@@ -17,7 +17,7 @@ app = Client(
     session_string=string_session
 )
 
-# 🌐 FLASK (for Render Web Service)
+# 🌐 FLASK
 web = Flask(__name__)
 
 @web.route('/')
@@ -25,16 +25,21 @@ def home():
     return "Bot is running!"
 
 def run_web():
-    port = int(os.environ.get("PORT", 10000))  # 🔥 IMPORTANT FIX
+    port = int(os.environ.get("PORT", 10000))
     web.run(host="0.0.0.0", port=port)
 
-# 🔥 SOURCE CHANNELS
+# 🔥 UPDATED SOURCE CHANNELS
 SOURCES = [
     -1001714047949,
     -1001404064358,
     -1001659536566,
     -1001153554563,
-    -1001677474141
+    -1001677474141,
+    -1001387115878,
+    -1002167725152,
+    -1001302730016,
+    -1002393042058,
+    -1001312563683
 ]
 
 # 🎯 TARGET CHANNEL
@@ -47,8 +52,12 @@ last_ids = {source: 0 for source in SOURCES}
 async def run_bot():
     print("🔥 Starting bot...")
 
-    await app.start()
-    print("✅ Bot login success")
+    try:
+        await app.start()
+        print("✅ Bot login success")
+    except Exception as e:
+        print("❌ LOGIN ERROR:", e)
+        return
 
     await app.send_message("me", "✅ BOT STARTED")
 
@@ -96,7 +105,7 @@ async def run_bot():
 
         await asyncio.sleep(5)
 
-# 🚀 START BOTH
+# 🚀 START
 if __name__ == "__main__":
     Thread(target=run_web, daemon=True).start()
     asyncio.run(run_bot())
