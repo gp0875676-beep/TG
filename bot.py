@@ -4,10 +4,18 @@ import os
 from flask import Flask
 from threading import Thread
 
+print("🚀 FILE STARTED")
+
 # 🔐 ENV VARIABLES
-api_id = int(os.getenv("API_ID"))
+api_id = os.getenv("API_ID")
 api_hash = os.getenv("API_HASH")
 string_session = os.getenv("STRING_SESSION")
+
+if not api_id or not api_hash or not string_session:
+    print("❌ ENV VARIABLES MISSING")
+    exit()
+
+api_id = int(api_id)
 
 # 🤖 TELEGRAM CLIENT
 app = Client(
@@ -17,7 +25,7 @@ app = Client(
     session_string=string_session
 )
 
-# 🌐 FLASK
+# 🌐 FLASK SERVER
 web = Flask(__name__)
 
 @web.route('/')
@@ -26,9 +34,10 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
+    print("🌐 Flask started on port", port)
     web.run(host="0.0.0.0", port=port)
 
-# ✅ ONLY OLD WORKING SOURCES
+# 🔥 SOURCE CHANNELS (OLD WORKING)
 SOURCES = [
     -1001714047949,
     -1001404064358,
@@ -43,7 +52,7 @@ TARGET = -1003817655107
 # 🔁 TRACKER
 last_ids = {source: 0 for source in SOURCES}
 
-# 🚀 BOT LOGIC
+# 🚀 BOT FUNCTION
 async def run_bot():
     print("🔥 Starting bot...")
 
@@ -51,10 +60,13 @@ async def run_bot():
         await app.start()
         print("✅ Bot login success")
     except Exception as e:
-        print("❌ LOGIN ERROR:", e)
+        print("❌ BOT LOGIN ERROR:", e)
         return
 
-    await app.send_message("me", "✅ BOT STARTED")
+    try:
+        await app.send_message("me", "✅ BOT STARTED")
+    except Exception as e:
+        print("❌ SELF MSG ERROR:", e)
 
     while True:
         for source in SOURCES:
@@ -65,6 +77,7 @@ async def run_bot():
 
                 for msg in reversed(messages):
 
+                    # skip old msgs first run
                     if last_ids[source] == 0:
                         last_ids[source] = msg.id
                         continue
@@ -98,9 +111,10 @@ async def run_bot():
             except Exception as e:
                 print(f"❌ Source error {source}:", e)
 
+        print("👀 Bot running...")
         await asyncio.sleep(5)
 
-# 🚀 START
+# 🚀 START BOTH
 if __name__ == "__main__":
-    Thread(target=run_web, daemon=True).start()
+    Thread(target=run_web).start()   # 🔥 daemon हटाया
     asyncio.run(run_bot())
