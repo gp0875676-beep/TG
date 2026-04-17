@@ -1,6 +1,8 @@
 from pyrogram import Client
 import asyncio
 import os
+from flask import Flask
+from threading import Thread
 
 # 🔐 ENV VARIABLES
 api_id = int(os.getenv("API_ID"))
@@ -14,6 +16,17 @@ app = Client(
     api_hash=api_hash,
     session_string=string_session
 )
+
+# 🌐 FLASK (for Render Web Service)
+web = Flask(__name__)
+
+@web.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))  # 🔥 IMPORTANT FIX
+    web.run(host="0.0.0.0", port=port)
 
 # 🔥 SOURCE CHANNELS
 SOURCES = [
@@ -30,35 +43,24 @@ TARGET = -1003817655107
 # 🔁 TRACKER
 last_ids = {source: 0 for source in SOURCES}
 
-# 🚀 MAIN FUNCTION
-async def main():
-    print("🔥 Bot starting...")
+# 🚀 BOT LOGIC
+async def run_bot():
+    print("🔥 Starting bot...")
 
-    try:
-        await app.start()
-        print("✅ Bot login success")
-    except Exception as e:
-        print("❌ Login error:", e)
-        return
+    await app.start()
+    print("✅ Bot login success")
 
-    # 🧪 SELF TEST
-    try:
-        await app.send_message("me", "✅ BOT STARTED")
-    except:
-        pass
+    await app.send_message("me", "✅ BOT STARTED")
 
-    # 🔁 LOOP
     while True:
         for source in SOURCES:
             try:
                 messages = []
-
                 async for msg in app.get_chat_history(source, limit=5):
                     messages.append(msg)
 
                 for msg in reversed(messages):
 
-                    # first run skip old msgs
                     if last_ids[source] == 0:
                         last_ids[source] = msg.id
                         continue
@@ -94,6 +96,7 @@ async def main():
 
         await asyncio.sleep(5)
 
-# 🚀 RUN
+# 🚀 START BOTH
 if __name__ == "__main__":
-    asyncio.run(main())
+    Thread(target=run_web, daemon=True).start()
+    asyncio.run(run_bot())
