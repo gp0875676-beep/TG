@@ -1,29 +1,21 @@
 from pyrogram import Client
-import time
-from flask import Flask
-from threading import Thread
+import asyncio
+import os
 
-# 🔑 API DETAILS
-api_id = 39158778
-api_hash = "d3e48eebf551f78540740492b3dca674"
+# 🔐 ENV VARIABLES
+api_id = int(os.getenv("API_ID"))
+api_hash = os.getenv("API_HASH")
+string_session = os.getenv("STRING_SESSION")
 
-app = Client("my_account", api_id=api_id, api_hash=api_hash)
+# 🤖 TELEGRAM CLIENT
+app = Client(
+    "my_account",
+    api_id=api_id,
+    api_hash=api_hash,
+    session_string=string_session
+)
 
-# 🌐 KEEP ALIVE SERVER (IMPORTANT FOR RENDER)
-web_app = Flask('')
-
-@web_app.route('/')
-def home():
-    return "Bot is running!"
-
-def run():
-    web_app.run(host='0.0.0.0', port=10000)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# 🔥 MULTIPLE SOURCE CHANNELS
+# 🔥 SOURCE CHANNELS
 SOURCES = [
     -1001714047949,
     -1001404064358,
@@ -35,53 +27,73 @@ SOURCES = [
 # 🎯 TARGET CHANNEL
 TARGET = -1003817655107
 
-# 🔁 Har source ka last_id store
+# 🔁 TRACKER
 last_ids = {source: 0 for source in SOURCES}
 
-# 🚀 START
-keep_alive()
+# 🚀 MAIN FUNCTION
+async def main():
+    print("🔥 Bot starting...")
 
-with app:
-    print("🚀 Bot started...")
+    try:
+        await app.start()
+        print("✅ Bot login success")
+    except Exception as e:
+        print("❌ Login error:", e)
+        return
 
+    # 🧪 SELF TEST
+    try:
+        await app.send_message("me", "✅ BOT STARTED")
+    except:
+        pass
+
+    # 🔁 LOOP
     while True:
         for source in SOURCES:
             try:
-                messages = app.get_chat_history(source, limit=5)
+                messages = []
 
-                for msg in messages:
+                async for msg in app.get_chat_history(source, limit=5):
+                    messages.append(msg)
+
+                for msg in reversed(messages):
+
+                    # first run skip old msgs
+                    if last_ids[source] == 0:
+                        last_ids[source] = msg.id
+                        continue
+
                     if msg.id > last_ids[source]:
                         last_ids[source] = msg.id
 
                         try:
-                            # ✅ TEXT
                             if msg.text:
-                                app.send_message(TARGET, msg.text)
+                                await app.send_message(TARGET, msg.text)
 
-                            # ✅ PHOTO
                             elif msg.photo:
-                                app.send_photo(
+                                await app.send_photo(
                                     TARGET,
-                                    photo=msg.photo.file_id,
+                                    msg.photo.file_id,
                                     caption=msg.caption or ""
                                 )
 
-                            # ✅ DOCUMENT
                             elif msg.document:
-                                app.send_document(
+                                await app.send_document(
                                     TARGET,
-                                    document=msg.document.file_id,
+                                    msg.document.file_id,
                                     caption=msg.caption or ""
                                 )
 
                             print(f"✅ Sent from {source}")
 
-                            time.sleep(2)
-
                         except Exception as e:
-                            print("❌ Send Error:", e)
+                            print("❌ Send error:", e)
 
             except Exception as e:
-                print(f"❌ Source Error ({source}):", e)
+                print(f"❌ Source error {source}:", e)
 
-        time.sleep(5)
+        await asyncio.sleep(5)
+
+# 🚀 RUN
+if __name__ == "__main__":
+    asyncio.run(main())
