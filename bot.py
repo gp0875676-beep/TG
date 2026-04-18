@@ -1,4 +1,5 @@
 from pyrogram import Client
+from pyrogram.errors import FloodWait
 import asyncio
 import os
 import json
@@ -38,7 +39,7 @@ def run_web():
     print("🌐 Flask started on port", port)
     web.run(host="0.0.0.0", port=port)
 
-# 🔥 SOURCE CHANNELS (10 TOTAL)
+# 🔥 SOURCE CHANNELS (9 TOTAL)
 SOURCES = [
     -1001714047949,   # purana 1
     -1001404064358,   # purana 2
@@ -46,7 +47,6 @@ SOURCES = [
     -1001153554563,   # purana 4
     -1001677474141,   # purana 5
     -1001686703979,   # naya 1 ✅
-    -1001377627085,   # naya 2 ✅
     -1001315464303,   # naya 3 ✅
     -1001707571730,   # naya 4 ✅
     -1001312563683    # naya 5 ✅
@@ -55,14 +55,13 @@ SOURCES = [
 # 🎯 TARGET CHANNEL
 TARGET = -1003817655107
 
-# 💾 LAST IDs FILE (restart ke baad bhi yaad rahega)
-LAST_IDS_FILE = "last_ids.json"
+# 💾 /tmp — Render compatible
+LAST_IDS_FILE = "/tmp/last_ids.json"
 
 def load_last_ids():
     if os.path.exists(LAST_IDS_FILE):
         with open(LAST_IDS_FILE, "r") as f:
             data = json.load(f)
-            # Naye channels ke liye 0 set karo
             for source in SOURCES:
                 if str(source) not in data:
                     data[str(source)] = 0
@@ -88,53 +87,69 @@ async def run_bot():
     except Exception as e:
         print("❌ SELF MSG ERROR:", e)
 
-    # 💾 Load saved IDs
     last_ids = load_last_ids()
 
-    while True:
-        for source in SOURCES:
-            key = str(source)
-            try:
-                messages = []
-                async for msg in app.get_chat_history(source, limit=5):
-                    messages.append(msg)
+    try:
+        while True:
+            for source in SOURCES:
+                key = str(source)
+                try:
+                    # ✅ List me collect karo phir reverse — correct order!
+                    messages = []
+                    async for msg in app.get_chat_history(source, limit=5):
+                        messages.append(msg)
 
-                for msg in reversed(messages):
-                    # First run — sirf ID save karo, forward mat karo
-                    if last_ids[key] == 0:
+                    for msg in reversed(messages):  # old → new order
+                        # First run — sirf ID save karo
+                        if last_ids[key] == 0:
+                            last_ids[key] = msg.id
+                            save_last_ids(last_ids)
+                            continue
+
+                        # Duplicate skip
+                        if msg.id <= last_ids[key]:
+                            continue
+
                         last_ids[key] = msg.id
                         save_last_ids(last_ids)
-                        continue
 
-                    if msg.id > last_ids[key]:
-                        last_ids[key] = msg.id
-                        save_last_ids(last_ids)  # 💾 Turant save karo
                         try:
-                            if msg.text:
-                                await app.send_message(TARGET, msg.text)
-                            elif msg.photo:
-                                await app.send_photo(
-                                    TARGET,
-                                    msg.photo.file_id,
-                                    caption=msg.caption or ""
-                                )
-                            elif msg.document:
-                                await app.send_document(
-                                    TARGET,
-                                    msg.document.file_id,
-                                    caption=msg.caption or ""
-                                )
-                            print(f"✅ Sent from {source}")
+                            await app.copy_message(TARGET, source, msg.id)
+                            print(f"📩 {source} → {msg.id}")
+                        except FloodWait as e:
+                            print(f"⏳ FloodWait: {e.value} sec...")
+                            await asyncio.sleep(e.value)
                         except Exception as e:
-                            print("❌ Send error:", e)
+                            print(f"❌ Send error: {e}")
 
-            except Exception as e:
-                print(f"❌ Source error {source}:", e)
+                except Exception as e:
+                    if "CHANNEL_PRIVATE" in str(e):
+                        print(f"🚫 Not joined: {source}")
+                    else:
+                        print(f"❌ Source error {source}: {e}")
 
-        print("👀 Bot running...")
-        await asyncio.sleep(5)
+                # ✅ Har channel ke baad 1 sec
+                await asyncio.sleep(1)
 
-# 🚀 START BOTH
+            print("👀 Bot running...")
+            await asyncio.sleep(10)
+
+    finally:
+        # ✅ Graceful shutdown
+        print("🛑 Bot stop ho raha hai...")
+        await app.stop()
+
+# ✅ AUTO RESTART — crash pe khud restart
+async def main():
+    while True:
+        try:
+            await run_bot()
+        except Exception as e:
+            print(f"❌ BOT CRASH: {e}")
+            print("🔄 5 sec baad restart...")
+            await asyncio.sleep(5)
+
+# 🚀 START
 if __name__ == "__main__":
-    Thread(target=run_web).start()
-    asyncio.run(run_bot())
+    Thread(target=run_web, daemon=True).start()
+    asyncio.run(main())
