@@ -3,6 +3,7 @@ from pyrogram.errors import FloodWait
 import asyncio
 import os
 import json
+import time
 from flask import Flask
 from threading import Thread
 
@@ -39,7 +40,7 @@ def run_web():
     print("🌐 Flask started on port", port)
     web.run(host="0.0.0.0", port=port)
 
-# 🔥 SOURCE CHANNELS (9 TOTAL)
+# 🔥 SOURCE CHANNELS (10 TOTAL)
 SOURCES = [
     -1001714047949,   # purana 1
     -1001404064358,   # purana 2
@@ -47,6 +48,7 @@ SOURCES = [
     -1001153554563,   # purana 4
     -1001677474141,   # purana 5
     -1001686703979,   # naya 1 ✅
+    -1001387115878,   # naya 2 ✅
     -1001315464303,   # naya 3 ✅
     -1001707571730,   # naya 4 ✅
     -1001312563683    # naya 5 ✅
@@ -57,6 +59,21 @@ TARGET = -1003817655107
 
 # 💾 /tmp — Render compatible
 LAST_IDS_FILE = "/tmp/last_ids.json"
+
+# 📊 HEALTH TRACKER
+channel_status = {str(source): "🟡 Waiting" for source in SOURCES}
+
+# ✅ DUPLICATE TRACKER
+forwarded_ids = set()
+
+# 🔴 ERROR COUNTER
+error_count = {}
+
+# ⏰ SMART DISABLED TRACKER
+disabled_until = {}
+
+# 💾 Disk write counter
+save_counter = 0
 
 def load_last_ids():
     if os.path.exists(LAST_IDS_FILE):
@@ -74,6 +91,13 @@ def save_last_ids(last_ids):
 
 # 🚀 BOT FUNCTION
 async def run_bot():
+    global forwarded_ids, save_counter, error_count, disabled_until
+
+    forwarded_ids.clear()
+    error_count.clear()
+    disabled_until.clear()
+    save_counter = 0
+
     print("🔥 Starting bot...")
     try:
         await app.start()
@@ -89,57 +113,138 @@ async def run_bot():
 
     last_ids = load_last_ids()
 
+    # ✅ Startup pe turant save — crash se bachao
+    save_last_ids(last_ids)
+
+    print("\n🔍 Checking all channels...")
+    for source in SOURCES:
+        key = str(source)
+        try:
+            await app.get_chat(source)
+            channel_status[key] = "✅ Accessible"
+            print(f"✅ {source} → OK")
+        except Exception as e:
+            channel_status[key] = "🔴 Error"
+            print(f"❌ {source} → {e}")
+        await asyncio.sleep(1)
+
     try:
         while True:
             for source in SOURCES:
                 key = str(source)
+
+                # ✅ Smart disabled — 60 sec baad auto retry
+                if error_count.get(key, 0) > 5:
+                    if key not in disabled_until:
+                        disabled_until[key] = time.time() + 60
+                        channel_status[key] = "⛔ Disabled (auto retry 60s)"
+                        print(f"⛔ {source} disabled — 60s baad retry")
+
+                if key in disabled_until:
+                    if time.time() < disabled_until[key]:
+                        continue
+                    else:
+                        del disabled_until[key]
+                        error_count[key] = 0
+                        channel_status[key] = "🟡 Retrying..."
+                        print(f"🔄 {source} retry ho raha hai...")
+
                 try:
-                    # ✅ List me collect karo phir reverse — correct order!
                     messages = []
                     async for msg in app.get_chat_history(source, limit=5):
                         messages.append(msg)
 
-                    for msg in reversed(messages):  # old → new order
-                        # First run — sirf ID save karo
+                    await asyncio.sleep(0.5)
+
+                    if not messages:
+                        channel_status[key] = "🟡 No recent msg"
+                        continue
+
+                    error_count[key] = 0
+
+                    for msg in reversed(messages):
                         if last_ids[key] == 0:
                             last_ids[key] = msg.id
-                            save_last_ids(last_ids)
+                            save_counter += 1
                             continue
 
-                        # Duplicate skip
                         if msg.id <= last_ids[key]:
                             continue
 
-                        last_ids[key] = msg.id
-                        save_last_ids(last_ids)
+                        msg_key = f"{source}_{msg.id}"
+                        if msg_key in forwarded_ids:
+                            continue
 
                         try:
                             await app.copy_message(TARGET, source, msg.id)
+
+                            last_ids[key] = msg.id
+                            forwarded_ids.add(msg_key)
+
+                            # ✅ Simple safe clear — set unordered hota hai
+                            if len(forwarded_ids) > 500:
+                                forwarded_ids.clear()
+
+                            channel_status[key] = f"🟢 Active @ {time.strftime('%H:%M:%S')}"
                             print(f"📩 {source} → {msg.id}")
+
+                            save_counter += 1
+                            if save_counter >= 5:
+                                save_last_ids(last_ids)
+                                save_counter = 0
+
                         except FloodWait as e:
                             print(f"⏳ FloodWait: {e.value} sec...")
                             await asyncio.sleep(e.value)
+
+                            try:
+                                await app.copy_message(TARGET, source, msg.id)
+
+                                last_ids[key] = msg.id
+                                forwarded_ids.add(msg_key)
+
+                                channel_status[key] = f"🟢 Active @ {time.strftime('%H:%M:%S')}"
+                                print(f"📩 RETRY SUCCESS {source} → {msg.id}")
+
+                                save_counter += 1
+                                if save_counter >= 5:
+                                    save_last_ids(last_ids)
+                                    save_counter = 0
+
+                            except Exception as retry_e:
+                                print(f"❌ Retry failed: {retry_e}")
+
                         except Exception as e:
+                            channel_status[key] = "🔴 Send Error"
                             print(f"❌ Send error: {e}")
 
                 except Exception as e:
                     if "CHANNEL_PRIVATE" in str(e):
+                        channel_status[key] = "🚫 Private"
                         print(f"🚫 Not joined: {source}")
                     else:
+                        error_count[key] = error_count.get(key, 0) + 1
+                        channel_status[key] = f"🔴 Error ({error_count[key]}/5)"
                         print(f"❌ Source error {source}: {e}")
 
-                # ✅ Har channel ke baad 1 sec
-                await asyncio.sleep(1)
+                await asyncio.sleep(1.5)
 
-            print("👀 Bot running...")
-            await asyncio.sleep(10)
+            save_last_ids(last_ids)
+            save_counter = 0
+
+            print("\n📊 CHANNEL STATUS:")
+            for src, status in channel_status.items():
+                print(f"  {src} → {status}")
+            print(f"  🕐 Time: {time.strftime('%H:%M:%S')}\n")
+
+            await asyncio.sleep(15)
 
     finally:
-        # ✅ Graceful shutdown
+        save_last_ids(last_ids)
         print("🛑 Bot stop ho raha hai...")
         await app.stop()
 
-# ✅ AUTO RESTART — crash pe khud restart
+# ✅ AUTO RESTART
 async def main():
     while True:
         try:
